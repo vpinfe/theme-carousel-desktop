@@ -22,6 +22,8 @@ async function start() {
     if (action === "select") vpin.launchTable(vpin.getCurrentTableIndex());
   });
 
+  wheelsEl.setAttribute("aria-label", vpin.t("theme.tables_label", "Tables"));
+
   draw();
   document.body.dataset.ready = "true";
 }
@@ -181,9 +183,13 @@ function drawTable(entry, index) {
 function drawCollection(row) {
   const count = row.table_count;
   setTitle(row.label);
-  metaEl.textContent = Number.isFinite(count) ? `${count} ${count === 1 ? "Table" : "Tables"}` : "";
+  metaEl.textContent = Number.isFinite(count) ? tableCount(count) : "";
   creditEl.hidden = true;
   artFader.clear();
+}
+
+function tableCount(count) {
+  return vpin.t("theme.tables", { one: "{count} Table", other: "{count} Tables" }, { count });
 }
 
 function setTitle(text) {

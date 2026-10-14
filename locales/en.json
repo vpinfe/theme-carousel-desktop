@@ -1,0 +1,8 @@
+{
+  "authors": "Authors",
+  "tables_label": "Tables",
+  "tables": {
+    "one": "{count} Table",
+    "other": "{count} Tables"
+  }
+}

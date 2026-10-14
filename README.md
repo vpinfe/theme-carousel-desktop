@@ -18,6 +18,7 @@ manifest.json         name, version, author, min_vpinfe and the windows the them
 index_playfield.html  the playfield page
 style.css             the look
 theme.js              the behavior
+locales/en.json       the theme's own words; add <language>.json to translate them
 fonts/                Rocket Command Expanded and Gradient
 preview.png           shown in the theme list
 ```
@@ -73,9 +74,10 @@ cabinet screen mounted on its side. The stage is styled by class, not by id, so 
 stage (`cqw`, `cqh`), and a wheel is a square no wider than a tenth of it, so nine always fit
 on a screen of any shape.
 
-Three pieces of text are fixed English and not translated: the word "Authors" in the page, the
-"Table" and "Tables" after a collection's count, and the `aria-label` on the row of wheels. The
-"Unknown Table" and "Unknown Author" fallbacks and "No tables found" go through `vpin.t`.
+Every word the theme shows goes through `vpin.t`, and its own words are in `locales/en.json`:
+the "Authors" label, the "Table" and "Tables" after a collection's count, and the `aria-label`
+on the row of wheels. To translate the theme, add a `locales/<language>.json` with the same
+keys. The "Unknown Table" and "Unknown Author" fallbacks and "No tables found" are core's.
 
 ## What core does, so this theme does not
 
