@@ -1,993 +1,271 @@
-/*
-Testing theme with carousel layout
-*/
+// Carousel Desktop - the backglass picture behind a row of wheels, with the selected table's
+// name, manufacturer and authors above the row.
+//
+// This file does four things, in this order: note that there are no options, draw the list,
+// draw the selection, and hand every message to core. The list is the row of wheels. Input,
+// audio, preloading, layout, the loading indicator, attract mode, turning the page for a
+// sideways screen and the backglass and score view pages are core's.
 
-// Globals
-windowName = ""
-currentTableIndex = 0;
-isAnimating = false;
-wheelMode = "tables";
-collectionEntries = [];
-currentCollectionIndex = 0;
-attractIdleTimer = null;
-attractAdvanceTimer = null;
-attractModeActive = false;
-attractSuspended = false;
-
-const carouselAnimationMs = 180;
-const ATTRACT_IDLE_MS = 60000;
-const ATTRACT_STEP_MS = 7000;
-
-// Audio manager for table audio with crossfade
-// Uses a single reusable Audio element. Tries direct audio.play() first
-// (works in Chromium with --autoplay-policy flag). If blocked by autoplay
-// policy (pywebview/WebKitGTK), falls back to trigger_audio_play via Python's
-// evaluate_js which runs in a privileged context.
-const tableAudio = {
-    audio: Object.assign(new Audio(), { loop: true }),
-    fadeId: null,        // interval handle for current fade
-    fadeDuration: 500,   // fade duration in ms
-    maxVolume: 0.8,
-    currentUrl: null,    // track what's currently loaded/playing
-
-    play(url, retries = 3) {
-        if (!url) {
-            this.stop();
-            return;
-        }
-
-        // If same track is already playing, do nothing
-        if (this.currentUrl === url && !this.audio.paused) {
-            return;
-        }
-
-        const audio = this.audio;
-
-        // Stop any current fade and immediately switch source
-        clearInterval(this.fadeId);
-        audio.pause();
-        audio.volume = 0;
-        audio.src = url;
-        this.currentUrl = url;
-
-        // Try direct play first (Chromium allows this via --autoplay-policy)
-        audio.play().then(() => {
-            if (this.currentUrl === url) {
-                this._fade(0, this.maxVolume);
-            }
-        }).catch(e => {
-            if (e.name === 'NotAllowedError') {
-                // Autoplay blocked (pywebview/WebKitGTK) - wait for audio to
-                // load, then ask Python to play via evaluate_js (privileged context)
-                console.log("Audio autoplay blocked, falling back to Python bridge");
-                this._retries = retries;
-                this._triggerWhenReady(url);
-            } else {
-                console.log("Audio play failed:", e.message, `(${retries} retries left)`);
-                // Retry - HTTP server may not be ready yet on startup
-                if (retries > 0 && this.currentUrl === url) {
-                    setTimeout(() => this.play(url, retries - 1), 1000);
-                }
-            }
-        });
-    },
-
-    // Wait for audio source to load, then request privileged play from Python.
-    // URL check ensures stale requests from fast navigation are ignored.
-    _triggerWhenReady(url) {
-        if (this.currentUrl !== url) return;
-        if (this.audio.readyState >= 2) {
-            vpin.call("trigger_audio_play").catch(() => {
-                console.log("trigger_audio_play not available");
-            });
-        } else {
-            this.audio.addEventListener('canplay', () => {
-                if (this.currentUrl === url) {
-                    vpin.call("trigger_audio_play").catch(() => {
-                        console.log("trigger_audio_play not available");
-                    });
-                }
-            }, { once: true });
-        }
-    },
-
-    // Called from Python via evaluate_js (privileged context bypasses autoplay policy).
-    // Audio is guaranteed loaded by _triggerWhenReady before this is called.
-    _resumePlay() {
-        const url = this.currentUrl;
-        const retries = this._retries || 0;
-        if (!url) return;
-
-        this.audio.play().then(() => {
-            if (this.currentUrl === url) {
-                this._fade(0, this.maxVolume);
-            }
-        }).catch(e => {
-            console.log("Audio play failed:", e.message, `(${retries} retries left)`);
-            if (retries > 0 && this.currentUrl === url) {
-                this._retries = retries - 1;
-                setTimeout(() => this._triggerWhenReady(url), 500);
-            }
-        });
-    },
-
-    stop() {
-        if (this.audio && !this.audio.paused) {
-            this._fade(this.audio.volume, 0, () => {
-                this.audio.pause();
-                this.currentUrl = null;
-            });
-        } else {
-            clearInterval(this.fadeId);
-            this.currentUrl = null;
-        }
-    },
-
-    _fade(from, to, onComplete) {
-        clearInterval(this.fadeId);
-        const audio = this.audio;
-        if (!audio) { if (onComplete) onComplete(); return; }
-
-        audio.volume = from;
-        const steps = this.fadeDuration / 20;
-        const delta = (to - from) / steps;
-
-        this.fadeId = setInterval(() => {
-            const next = audio.volume + delta;
-            if ((delta > 0 && next >= to) || (delta < 0 && next <= to) || delta === 0) {
-                audio.volume = to;
-                clearInterval(this.fadeId);
-                if (onComplete) onComplete();
-            } else {
-                audio.volume = next;
-            }
-        }, 20);
-    }
-};
-
-// init the core interface to VPinFE
 const vpin = new VPinFECore();
-vpin.init();
-window.vpin = vpin // main menu needs this to call back in.
+window.vpin = vpin;                  // core and its overlays look for this name
+window.receiveEvent = receiveEvent;  // core delivers every message through this one
 
-// Register receiveEvent globally BEFORE vpin.ready to avoid timing issues
-window.receiveEvent = receiveEvent;
+start();
 
-// wait for VPinFECore to be ready
-vpin.ready.then(async () => {
-    await vpin.call("get_my_window_name")
-        .then(result => {
-            windowName = result;
-        });
+async function start() {
+  vpin.init();
+  await vpin.ready;                  // the tables and the layout are in
 
-    vpin.registerInputHandler(handleInput);
+  // Input. Core moves the wheel, pages it and opens the menu and the collection picker.
+  // Select is the one action it leaves to a theme.
+  vpin.registerInputHandler((action) => {
+    if (action === "select") vpin.launchTable(vpin.getCurrentTableIndex());
+  });
 
-    // Initialize the display
-    updateScreen();
-    if (windowName === "table") {
-        setupAttractMode();
-        markUserActivity(false);
+  draw();
+  document.body.dataset.ready = "true";
+}
+
+// --- 1. Options ---------------------------------------------------------------------
+// This theme has no options, so there is no options.json. A theme that declares some reads
+// them here from vpin.themeConfig.
+
+// --- 2. The list --------------------------------------------------------------------
+// activeList() is the list core is moving: the tables, or the collections while the picker
+// is open. indexAfter(n) is core's wrap-around: it is the reason this file has no modulo.
+//
+// Up to nine wheels sit in the row with the selected one in the middle; the collection
+// picker shows seven, larger.
+
+const REACH = { tables: 4, collections: 3 };   // wheels either side of the selected one
+const MOVE_MS = 180;                           // the wheel transition in style.css
+
+const stage = document.querySelector(".stage");
+const wheelsEl = document.getElementById("wheels");
+const cards = new Map();
+
+function place(card, offset, reach) {
+  const selected = offset === 0;
+  if (selected && !card.classList.contains("selected")) {
+    card.classList.remove("shake");
+    card.offsetWidth;                // so the animation can start again
+    card.classList.add("shake");
+  }
+  card.style.setProperty("--offset", String(offset));
+  card.dataset.offset = String(offset);
+  if (selected) card.setAttribute("aria-current", "true");
+  else card.removeAttribute("aria-current");
+  card.classList.toggle("selected", selected);
+  card.classList.toggle("out", Math.abs(offset) > reach);
+}
+
+function drawWheels(list) {
+  const picking = list.kind === "collection";
+  const reach = picking ? REACH.collections : REACH.tables;
+  if (wheelsEl.dataset.kind !== list.kind) {
+    wheelsEl.replaceChildren();
+    cards.clear();
+    wheelsEl.dataset.kind = list.kind;
+  }
+
+  const shown = Math.min(2 * reach + 1, list.length);
+  const before = Math.min(reach, Math.floor((shown - 1) / 2));
+  const wanted = new Map();
+  for (let offset = -before; offset <= shown - 1 - before; offset += 1) {
+    const index = list.indexAfter(offset);
+    const item = list.items[index];
+    wanted.set(picking ? item.label : item.table.id, { index, item, offset });
+  }
+
+  for (const [key, card] of cards) {
+    if (wanted.has(key)) continue;
+    // Leaving: past the end of the row on the side it was on.
+    place(card, Math.sign(Number(card.dataset.offset) || 1) * (reach + 1), reach);
+    cards.delete(key);
+    setTimeout(() => card.remove(), MOVE_MS);
+  }
+
+  for (const [key, { index, item, offset }] of wanted) {
+    let card = cards.get(key);
+    if (!card) {
+      card = makeCard(list, index, item);
+      cards.set(key, card);
+      // Entering: it starts past the end of the row on the side it comes from.
+      place(card, Math.sign(offset || 1) * (reach + 1), reach);
+      wheelsEl.appendChild(card);
+      card.offsetWidth;              // so the move to its place is animated
+    } else if (Math.abs(offset - Number(card.dataset.offset)) > 2) {
+      // A short list wraps: the wheel that left one end is wanted at the other. It jumps
+      // there unanimated, so it does not slide across the others.
+      card.style.transition = "none";
+      place(card, Math.sign(offset || 1) * (reach + 1), reach);
+      card.offsetWidth;
+      card.style.transition = "";
     }
-});
+    place(card, offset, reach);
+  }
+}
 
-// listener for windows events.  VPinFECore uses this to send events to all windows.
+// A collection is a row with a label and pictures instead of a media list.
+function makeCard(list, index, item) {
+  const picking = list.kind === "collection";
+  const card = document.createElement("li");
+  const label = picking ? item.label : item.game.name;
+  const url = picking
+    ? item.image_url || (item.game_wheel_urls || [])[0]
+    : item.media.includes("wheel") && vpin.getImageURL(index, "wheel");
+
+  if (url) {
+    const node = document.createElement("img");
+    node.alt = label;
+    node.src = url;
+    card.appendChild(node);
+  } else {
+    const name = document.createElement("span");
+    name.className = "missing";
+    name.textContent = label;
+    card.appendChild(name);
+  }
+  return card;
+}
+
+// --- 3. The selection ---------------------------------------------------------------
+// Everything about the selected table is on its entry: entry.game is the game, entry.table
+// the file and entry.media lists the kinds of art that have a file. A collection in the
+// picker is a row with a name and a table count, and no picture behind it.
+
+const titleEl = document.getElementById("title");
+const metaEl = document.getElementById("meta");
+const creditEl = document.getElementById("credit");
+const authorsEl = document.getElementById("authors");
+const infoEl = document.getElementById("info");
+const artEl = document.getElementById("art");
+const emptyEl = document.getElementById("empty");
+
+function drawSelection(list) {
+  const empty = list.length === 0;
+  emptyEl.hidden = !empty;
+  emptyEl.textContent = vpin.t("frontend.theme.no_tables_found", "No tables found");
+  infoEl.hidden = empty;
+  wheelsEl.hidden = empty;
+  if (empty) {
+    stage.dataset.view = "tables";
+    artFader.clear();
+    return;
+  }
+
+  const picking = list.kind === "collection";
+  stage.dataset.view = picking ? "collections" : "tables";
+  if (picking) drawCollection(list.current);
+  else drawTable(list.current, list.cursor);
+}
+
+function drawTable(entry, index) {
+  const { game, table } = entry;
+
+  setTitle(game.name || vpin.t("frontend.theme.unknown_table", "Unknown Table"));
+  metaEl.textContent = [game.manufacturer, game.year].filter(Boolean).join(" • ");
+  creditEl.hidden = false;
+  authorsEl.textContent = table.authors.length
+    ? table.authors.join(", ")
+    : vpin.t("frontend.theme.unknown_author", "Unknown Author");
+  authorsEl.dataset.size = sizeFor(authorsEl.textContent.length, 30, 60);
+
+  // The backglass picture, else the full single screen one. getImageURL has no fallback, so
+  // a table with only the second is asked for it by name.
+  const kind = ["backglass", "playfield_fss"].find((name) => entry.media.includes(name));
+  if (kind) artFader.show(vpin.getImageURL(index, kind));
+  else artFader.clear();
+}
+
+function drawCollection(row) {
+  const count = row.table_count;
+  setTitle(row.label);
+  metaEl.textContent = Number.isFinite(count) ? `${count} ${count === 1 ? "Table" : "Tables"}` : "";
+  creditEl.hidden = true;
+  artFader.clear();
+}
+
+function setTitle(text) {
+  titleEl.textContent = text;
+  titleEl.dataset.size = sizeFor(text.length, 24, 40);
+}
+
+function sizeFor(length, long, longer) {
+  if (length > longer) return "longer";
+  return length > long ? "long" : "normal";
+}
+
+// The art. A new picture loads at the back and fades in over the one already there; a later
+// one supersedes it, so a slow load for a table no longer selected never shows. Asking for
+// the picture already showing changes nothing. A picture that cannot be loaded leaves the
+// screen dark, so the one before it does not stay up under another table's name.
+
+const FADE_MS = 500;                 // the layer transition in style.css
+
+const artFader = (() => {
+  let token = 0;
+  let shownURL = null;
+
+  function clear() {
+    token += 1;
+    shownURL = null;
+    for (const layer of artEl.querySelectorAll(".layer")) retire(layer);
+  }
+
+  function retire(layer) {
+    layer.classList.add("exiting");
+    setTimeout(() => layer.remove(), FADE_MS);
+  }
+
+  function show(url) {
+    if (url === shownURL) return;
+    shownURL = url;
+    token += 1;
+    const mine = token;
+    for (const layer of artEl.querySelectorAll(".entering")) layer.remove();
+
+    const node = document.createElement("img");
+    node.alt = "";
+    const layer = document.createElement("div");
+    layer.className = "layer entering";
+    layer.appendChild(node);
+    artEl.appendChild(layer);
+
+    node.addEventListener("load", () => {
+      if (mine !== token || !layer.isConnected) return;
+      for (const old of artEl.querySelectorAll(".layer:not(.entering):not(.exiting)")) retire(old);
+      layer.offsetWidth;             // so the fade starts from the hidden look
+      layer.classList.remove("entering");
+    }, { once: true });
+    node.addEventListener("error", () => {
+      if (mine === token && layer.isConnected) clear();
+    }, { once: true });
+    node.src = url;
+  }
+
+  return { show, clear };
+})();
+
+// --- 4. Messages --------------------------------------------------------------------
+// Core needs to see every message first: it keeps the selection, the audio and the
+// loading indicator in step with them. After that the theme draws.
+//
+// TableIndexUpdate is the wheel moving. TableDataChange is a new list, and core has
+// already filled in message.index by the time handleEvent returns.
+
 async function receiveEvent(message) {
-    // Let VPinFECore handle the data refresh logic
-    await vpin.handleEvent(message);
+  await vpin.handleEvent(message);
 
-    // Handle UI updates based on event type
-    if (message.type == "TableIndexUpdate") {
-        if (isCollectionMode()) leaveCollectionMode();
-        currentTableIndex = message.index;
-        updateScreen();
-        if (!attractModeActive) markUserActivity(false);
-    }
-    else if (message.type == "TableLaunching") {
-        attractSuspended = true;
-        stopAttractMode();
-        tableAudio.stop();
-        await fadeOut();
-    }
-    else if (message.type == "TableLaunchComplete") {
-        attractSuspended = false;
-        fadeIn();
-        if (windowName === "table") {
-            tableAudio.play(vpin.getAudioURL(currentTableIndex));
-            markUserActivity(false);
-        }
-    }
-    else if (message.type == "RemoteLaunching") {
-        // Remote launch from manager UI
-        attractSuspended = true;
-        stopAttractMode();
-        tableAudio.stop();
-        showRemoteLaunchOverlay(message.table_name);
-        await fadeOut();
-    }
-    else if (message.type == "RemoteLaunchComplete") {
-        // Remote launch completed
-        attractSuspended = false;
-        hideRemoteLaunchOverlay();
-        fadeIn();
-        if (windowName === "table") {
-            tableAudio.play(vpin.getAudioURL(currentTableIndex));
-            markUserActivity(false);
-        }
-    }
-    else if (message.type == "TableDataChange") {
-        if (isCollectionMode()) leaveCollectionMode();
-        currentTableIndex = message.index;
-        updateScreen();
-        if (!attractModeActive) markUserActivity(false);
-    }
+  if (message.type === "TableIndexUpdate" || message.type === "TableDataChange") draw();
 }
 
-// create an input handler function. ***** Only for the "table" window *****
-/*  joyleft
-    joyright
-    joyup
-    joydown
-    joypageup
-    joypagedown
-    joyselect
-    joymenu
-    joycollectionmenu
-*/
-async function handleInput(input) {
-    if (isAnimating) return; // Prevent rapid inputs during animation
-    markUserActivity();
-
-    switch (input) {
-        case "joyleft":
-            moveIndex(-1);
-            break;
-        case "joyright":
-            moveIndex(1);
-            break;
-        case "joyup":
-        case "joypageup":
-            moveIndex(-getCarouselPageSize());
-            break;
-        case "joydown":
-        case "joypagedown":
-            moveIndex(getCarouselPageSize());
-            break;
-        case "joyselect":
-            if (isCollectionMode()) {
-                await selectCurrentCollection();
-                break;
-            }
-            attractSuspended = true;
-            stopAttractMode();
-            tableAudio.stop();
-            vpin.sendMessageToAllWindows({ type: "TableLaunching" });
-            vpin.launchTable(currentTableIndex); // fire and forget — TableRunning/TableLaunchComplete arrive via events
-            await fadeOut();
-            break;
-        case "joyback":
-            await toggleCollectionMode();
-            break;
-    }
-}
-
-function crossfadeContainerImage(container, nextUrl) {
-    const currentImg = container.querySelector('img:last-of-type');
-
-    if (currentImg && currentImg.dataset.url === nextUrl) {
-        return;
-    }
-
-    const incoming = document.createElement('img');
-    incoming.src = nextUrl;
-    incoming.dataset.url = nextUrl;
-    incoming.style.opacity = '0';
-
-    incoming.onload = () => {
-        const staleImages = Array.from(container.querySelectorAll('img')).filter((img) => img !== currentImg);
-        staleImages.forEach((img) => img.remove());
-
-        container.appendChild(incoming);
-
-        requestAnimationFrame(() => {
-            incoming.style.opacity = '1';
-            if (currentImg) {
-                currentImg.style.opacity = '0';
-            }
-        });
-
-        if (currentImg) {
-            setTimeout(() => {
-                if (currentImg.parentElement === container) {
-                    currentImg.remove();
-                }
-            }, 300);
-        }
-    };
-
-    incoming.onerror = () => {
-        if (incoming.parentElement === container) {
-            incoming.remove();
-        }
-        if (currentImg) {
-            currentImg.style.opacity = '1';
-        }
-    };
-}
-
-// Update the main BG image with smooth transition
-function updateBGImage() {
-    const container = document.getElementById('bgImageContainer');
-    if (!container) return; // Window may not have this element
-
-    if (!vpin.tableData || vpin.tableData.length === 0) {
-        // Clear background image when no tables
-        container.innerHTML = '';
-        return;
-    }
-
-    const bgUrl = vpin.getImageURL(currentTableIndex, "bg");
-    crossfadeContainerImage(container, bgUrl);
-}
-
-// Update DMD image for DMD window
-function updateDMDImage() {
-    const container = document.getElementById('dmdImageContainer');
-    if (!container) return; // Window may not have this element
-
-    if (!vpin.tableData || vpin.tableData.length === 0) {
-        // Clear DMD image when no tables
-        container.innerHTML = '';
-        return;
-    }
-
-    const dmdUrl = vpin.getImageURL(currentTableIndex, "dmd");
-    crossfadeContainerImage(container, dmdUrl);
-}
-
-// Update table information text
-// Update table information text
-function updateTableInfo() {
-    if (isCollectionMode()) {
-        updateCollectionInfo();
-        return;
-    }
-
-    if (!vpin.tableData || vpin.tableData.length === 0) {
-        // Clear table info when no tables
-        const nameEl = document.getElementById('tableName');
-        const metaEl = document.getElementById('tableMeta');
-        const authorsEl = document.getElementById('authorsText');
-        if (nameEl) nameEl.textContent = 'No tables found';
-        if (metaEl) metaEl.textContent = '';
-        if (authorsEl) authorsEl.textContent = '';
-        return;
-    }
-
-    const table = vpin.getTableMeta(currentTableIndex);
-    const nameEl = document.getElementById('tableName');
-    const metaEl = document.getElementById('tableMeta');
-    const authorsEl = document.getElementById('authorsText');
-
-    const info = table?.meta?.Info || {};
-    const vpx = table?.meta?.VPXFile || {};
-
-    // Get table name from Info.Title first, fallback to filename
-    const tableName = info.Title || vpx.filename || table?.tableDirName || 'Unknown Table';
-
-    // Get manufacturer and year from Info first, fallback to VPXFile
-    const manufacturer = info.Manufacturer || vpx.manufacturer || 'Unknown';
-    const year = info.Year || vpx.year || '';
-
-    nameEl.textContent = tableName;
-    metaEl.textContent = manufacturer + (year ? ' • ' + year : '');
-
-    // Get authors from Info.Authors (array) or fallback
-    let authors = 'Unknown';
-    if (Array.isArray(info.Authors) && info.Authors.length > 0) {
-        authors = info.Authors.join(', ');
-    }
-
-    if (authorsEl) {
-        authorsEl.textContent = authors;
-
-        // Dynamically adjust authors font size based on text length
-        const authorsLength = authors.length;
-        let authorsFontSize;
-        if (authorsLength <= 20) {
-            authorsFontSize = '2vw';
-        } else if (authorsLength <= 30) {
-            authorsFontSize = '1.8vw';
-        } else if (authorsLength <= 40) {
-            authorsFontSize = '1.6vw';
-        } else if (authorsLength <= 50) {
-            authorsFontSize = '1.4vw';
-        } else {
-            authorsFontSize = '1.2vw';
-        }
-        authorsEl.style.fontSize = authorsFontSize;
-    }
-
-    // Dynamically adjust font size for table name
-    const textLength = tableName.length;
-    let fontSize;
-    if (textLength <= 20) {
-        fontSize = '4vw';
-    } else if (textLength <= 30) {
-        fontSize = '3.5vw';
-    } else if (textLength <= 40) {
-        fontSize = '3vw';
-    } else if (textLength <= 50) {
-        fontSize = '2.5vw';
-    } else {
-        fontSize = '2vw';
-    }
-    nameEl.style.fontSize = fontSize;
-}
-
-function updateCollectionInfo() {
-    const collection = collectionEntries[currentCollectionIndex] || {};
-    const nameEl = document.getElementById('tableName');
-    const metaEl = document.getElementById('tableMeta');
-    const authorsEl = document.getElementById('authorsText');
-    const tableCount = Number(collection.table_count);
-    const countText = Number.isFinite(tableCount)
-        ? tableCount + ' ' + (tableCount === 1 ? 'table' : 'tables')
-        : 'Collection';
-
-    if (nameEl) {
-        nameEl.textContent = collection.name || 'Collection';
-        nameEl.style.fontSize = '4vw';
-    }
-    if (metaEl) {
-        metaEl.textContent = collection.is_filter ? 'Filter collection' : countText;
-    }
-    if (authorsEl) {
-        authorsEl.textContent = countText;
-        authorsEl.style.fontSize = '2vw';
-    }
-}
-
-function parseMaybeJson(value, fallback) {
-    if (typeof value !== "string") return value ?? fallback;
-    try {
-        return JSON.parse(value);
-    } catch {
-        return fallback;
-    }
-}
-
-function isCollectionMode() {
-    return wheelMode === "collections";
-}
-
-function getCurrentCarouselIndex() {
-    return isCollectionMode() ? currentCollectionIndex : currentTableIndex;
-}
-
-function setCurrentCarouselIndex(index) {
-    if (isCollectionMode()) {
-        currentCollectionIndex = index;
-    } else {
-        currentTableIndex = index;
-    }
-}
-
-function getCarouselItemCount() {
-    return isCollectionMode() ? collectionEntries.length : (vpin.tableData?.length || 0);
-}
-
-function getCarouselPageSize() {
-    const itemCount = getCarouselItemCount();
-    if (!itemCount) return 1;
-    return Math.max(1, Math.min(9, itemCount));
-}
-
-function moveIndex(delta) {
-    const itemCount = getCarouselItemCount();
-    if (!itemCount || delta === 0) return;
-
-    const isCollection = isCollectionMode();
-    const currentIndex = isCollection ? currentCollectionIndex : currentTableIndex;
-    const nextIndex = wrapIndex(currentIndex + delta, itemCount);
-    if (nextIndex === currentIndex) return;
-
-    const isPageMove = Math.abs(delta) > 1;
-
-    isAnimating = true;
-    const direction = isPageMove
-        ? (delta < 0 ? 'up' : 'down')
-        : (delta < 0 ? 'left' : 'right');
-
-    if (isCollection) {
-        currentCollectionIndex = nextIndex;
-        updateScreen(direction);
-        return;
-    }
-
-    currentTableIndex = nextIndex;
-    updateScreen(direction);
-    vpin.sendMessageToAllWindows({
-        type: 'TableIndexUpdate',
-        index: currentTableIndex
-    });
-}
-
-function getCarouselWheelUrl(index) {
-    if (isCollectionMode()) {
-        return collectionEntries[index]?.image_url || "";
-    }
-    return vpin.getImageURL(index, "wheel");
-}
-
-function getCarouselAltText(index) {
-    if (isCollectionMode()) {
-        return collectionEntries[index]?.name || 'Collection ' + index;
-    }
-    return 'Table ' + index;
-}
-
-
-// Build the carousel with wheel images
-function buildCarousel(direction = null) {
-    const track = document.getElementById('carouselTrack');
-    const itemCount = getCarouselItemCount();
-
-    if (!itemCount) {
-        // Clear carousel when no tables
-        track.innerHTML = '';
-        isAnimating = false;
-        return;
-    }
-
-    const visibleItems = Math.min(9, itemCount); // Show up to 9 items
-    const sideItems = Math.floor(visibleItems / 2);
-
-    // Get existing items
-    const existingItems = Array.from(track.children);
-
-    // If first build, number of items changed, or no direction (collection/filter change), rebuild completely
-    if (existingItems.length === 0 || existingItems.length !== visibleItems || direction === null) {
-        track.innerHTML = ''; // Clear all existing items
-        for (let i = -sideItems; i <= sideItems; i++) {
-            const idx = wrapIndex(getCurrentCarouselIndex() + i, itemCount);
-            createCarouselItem(idx, i === 0, track);
-        }
-        isAnimating = false;
-    } else if (direction === 'left' || direction === 'right') {
-        // Horizontal slot shift for single-step left/right moves.
-        animateCarouselShift(track, direction, sideItems, itemCount);
-    } else if (direction === 'up' || direction === 'down') {
-        // Vertical page transition with fixed timing/offset.
-        animateCarouselPageShift(track, direction, sideItems, itemCount);
-    } else {
-        rebuildCarouselItems(track, sideItems, itemCount);
-        isAnimating = false;
-    }
-}
-
-function animateCarouselShift(track, direction, sideItems, itemCount) {
-    const step = getCarouselStep(track);
-    if (!step) {
-        updateCarouselItems(Array.from(track.children), sideItems, itemCount, false);
-        isAnimating = false;
-        return;
-    }
-
-    track.style.transition = 'none';
-    track.style.transform = 'translateX(0)';
-    track.style.width = `${track.getBoundingClientRect().width}px`;
-    track.style.justifyContent = 'flex-start';
-
-    if (direction === 'right') {
-        const nextEdgeIndex = wrapIndex(getCurrentCarouselIndex() + sideItems, itemCount);
-        createCarouselItem(nextEdgeIndex, false, track);
-        updateCarouselSelection(track, sideItems + 1);
-
-        requestAnimationFrame(() => {
-            track.style.transition = `transform ${carouselAnimationMs}ms cubic-bezier(0.2, 0.8, 0.2, 1)`;
-            track.style.transform = `translateX(${-step}px)`;
-        });
-    } else if (direction === 'left') {
-        const previousEdgeIndex = wrapIndex(getCurrentCarouselIndex() - sideItems, itemCount);
-        const newItem = createCarouselItem(previousEdgeIndex, false);
-        track.insertBefore(newItem, track.firstChild);
-        track.style.transform = `translateX(${-step}px)`;
-        updateCarouselSelection(track, sideItems);
-
-        requestAnimationFrame(() => {
-            track.style.transition = `transform ${carouselAnimationMs}ms cubic-bezier(0.2, 0.8, 0.2, 1)`;
-            track.style.transform = 'translateX(0)';
-        });
-    } else {
-        updateCarouselItems(Array.from(track.children), sideItems, itemCount, false);
-        isAnimating = false;
-        return;
-    }
-
-    let finished = false;
-    const finishShift = (e) => {
-        // Ignore transitionend events that bubble up from child items.
-        // Only act on the track's own transform transition (or the setTimeout fallback).
-        if (e && (e.target !== track || e.propertyName !== 'transform')) return;
-        if (finished) return;
-        finished = true;
-        track.removeEventListener('transitionend', finishShift);
-        track.style.transition = 'none';
-        track.style.transform = 'translateX(0)';
-        rebuildCarouselItems(track, sideItems, itemCount);
-        track.style.width = '';
-        track.style.justifyContent = '';
-        isAnimating = false;
-    };
-
-    track.addEventListener('transitionend', finishShift);
-    setTimeout(finishShift, carouselAnimationMs + 80);
-}
-
-function animateCarouselPageShift(track, direction, sideItems, itemCount) {
-    const container = track.parentElement;
-    if (!container) {
-        rebuildCarouselItems(track, sideItems, itemCount);
-        isAnimating = false;
-        return;
-    }
-
-    const step = getCarouselStep(track);
-    if (!step) {
-        updateCarouselItems(Array.from(track.children), sideItems, itemCount, false);
-        isAnimating = false;
-        return;
-    }
-
-    const outOffset = direction === 'up' ? step : -step;
-    const inStartOffset = -outOffset;
-
-    const trackRect = track.getBoundingClientRect();
-
-    const left = track.offsetLeft;
-    const top = track.offsetTop;
-    const width = trackRect.width;
-
-    const newTrack = track.cloneNode(false);
-    rebuildCarouselItems(newTrack, sideItems, itemCount);
-
-    const prepareOverlayTrack = (el, zIndex) => {
-        el.style.position = 'absolute';
-        el.style.left = `${left}px`;
-        el.style.top = `${top}px`;
-        el.style.width = `${width}px`;
-        el.style.margin = '0';
-        el.style.pointerEvents = 'none';
-        el.style.zIndex = String(zIndex);
-        el.style.transition = 'none';
-        el.style.justifyContent = 'flex-start';
-    };
-
-    prepareOverlayTrack(newTrack, 6);
-    newTrack.style.transform = `translateY(${inStartOffset}px)`;
-
-    track.style.visibility = 'hidden';
-    container.appendChild(newTrack);
-
-    requestAnimationFrame(() => {
-        newTrack.style.transition = `transform ${carouselAnimationMs}ms cubic-bezier(0.2, 0.8, 0.2, 1)`;
-        newTrack.style.transform = 'translateY(0)';
-    });
-
-    const finish = () => {
-        newTrack.remove();
-        rebuildCarouselItems(track, sideItems, itemCount);
-        track.style.visibility = '';
-        track.style.transition = 'none';
-        track.style.transform = 'translateX(0) translateY(0)';
-        track.style.width = '';
-        track.style.justifyContent = '';
-        isAnimating = false;
-    };
-
-    setTimeout(finish, carouselAnimationMs + 40);
-}
-
-function getCarouselStep(track) {
-    const first = track.children[0];
-    if (!first) return 0;
-
-    const itemWidth = first.getBoundingClientRect().width;
-    const styles = window.getComputedStyle(track);
-    const gap = parseFloat(styles.columnGap || styles.gap) || 0;
-    return itemWidth + gap;
-}
-
-function updateCarouselSelection(track, selectedIndex) {
-    Array.from(track.children).forEach((item, index) => {
-        item.classList.toggle('selected', index === selectedIndex);
-        item.classList.remove('jiggle');
-    });
-}
-
-function rebuildCarouselItems(track, sideItems, itemCount) {
-    track.innerHTML = '';
-    for (let i = -sideItems; i <= sideItems; i++) {
-        const idx = wrapIndex(getCurrentCarouselIndex() + i, itemCount);
-        createCarouselItem(idx, i === 0, track);
-    }
-}
-
-// Update carousel items in place
-function updateCarouselItems(existingItems, sideItems, itemCount, animated = false) {
-    existingItems.forEach((item, index) => {
-        const offset = index - sideItems;
-        const idx = wrapIndex(getCurrentCarouselIndex() + offset, itemCount);
-        const wheelUrl = getCarouselWheelUrl(idx);
-
-        // Update selected class
-        if (offset === 0) {
-            item.classList.add('selected');
-
-            // Add jiggle animation when animated
-            if (animated) {
-                // Remove jiggle first in case it's already there
-                item.classList.remove('jiggle');
-
-                // Use requestAnimationFrame to ensure the removal is processed
-                requestAnimationFrame(() => {
-                    requestAnimationFrame(() => {
-                        item.classList.add('jiggle');
-
-                        // Remove jiggle class after animation completes
-                        setTimeout(() => {
-                            item.classList.remove('jiggle');
-                        }, carouselAnimationMs);
-                    });
-                });
-            }
-        } else {
-            item.classList.remove('selected');
-            item.classList.remove('jiggle');
-        }
-
-        // Update image
-        const img = item.querySelector('img');
-        if (img && img.src !== wheelUrl) {
-            img.src = wheelUrl;
-            img.alt = getCarouselAltText(idx);
-        }
-    });
-
-    // If animated, wait for CSS transition to complete
-    if (animated) {
-        setTimeout(() => {
-            isAnimating = false;
-        }, carouselAnimationMs);
-    }
-}
-
-// Helper function to create a carousel item
-function createCarouselItem(idx, isSelected, track) {
-    const wheelUrl = getCarouselWheelUrl(idx);
-
-    const item = document.createElement('div');
-    item.className = 'carousel-item';
-    if (isSelected) {
-        item.classList.add('selected');
-    }
-
-    if (wheelUrl) {
-        const img = document.createElement('img');
-        img.src = wheelUrl;
-        img.alt = getCarouselAltText(idx);
-
-        // Handle missing images
-        img.onerror = () => {
-            const placeholder = document.createElement('div');
-            placeholder.className = 'missing-placeholder';
-            placeholder.textContent = getCarouselAltText(idx);
-            item.innerHTML = '';
-            item.appendChild(placeholder);
-        };
-
-        item.appendChild(img);
-    } else {
-        const placeholder = document.createElement('div');
-        placeholder.className = 'missing-placeholder';
-        placeholder.textContent = getCarouselAltText(idx);
-        item.appendChild(placeholder);
-    }
-
-    if (track) track.appendChild(item);
-    return item;
-}
-
-// Main update function
-function updateScreen(direction = null) {
-    // Update based on window type
-    if (windowName === "table") {
-        updateBGImage();
-        updateTableInfo();
-        buildCarousel(direction);
-        // Play audio for the selected table
-        tableAudio.play(vpin.getAudioURL(currentTableIndex));
-    } else if (windowName === "bg") {
-        updateBGImage();
-    } else if (windowName === "dmd") {
-        updateDMDImage();
-    }
-}
-
-// Smooth fade transition - wait for CSS transition to complete
-async function fadeOut() {
-    const fadeContainer = document.getElementById('fadeContainer');
-
-    return new Promise(resolve => {
-        fadeContainer.addEventListener('transitionend', e => {
-            if (e.propertyName === 'opacity') resolve();
-        }, { once: true });
-
-        fadeContainer.style.opacity = '0';
-    });
-}
-
-function fadeIn() {
-    const fadeContainer = document.getElementById('fadeContainer');
-    fadeContainer.style.opacity = '1';
-}
-
-// Remote launch overlay functions
-function showRemoteLaunchOverlay(tableName) {
-    const overlay = document.getElementById('remote-launch-overlay');
-    const nameEl = document.getElementById('remote-launch-table-name');
-    if (overlay && nameEl) {
-        nameEl.textContent = tableName || 'Unknown Table';
-        overlay.style.display = 'flex';
-    }
-}
-
-function hideRemoteLaunchOverlay() {
-    const overlay = document.getElementById('remote-launch-overlay');
-    if (overlay) {
-        overlay.style.display = 'none';
-    }
-}
-
-function clearAttractTimers() {
-    if (attractIdleTimer) {
-        clearTimeout(attractIdleTimer);
-        attractIdleTimer = null;
-    }
-    if (attractAdvanceTimer) {
-        clearTimeout(attractAdvanceTimer);
-        attractAdvanceTimer = null;
-    }
-}
-
-function stopAttractMode() {
-    attractModeActive = false;
-    clearAttractTimers();
-}
-
-function shouldPauseAttractMode() {
-    return (
-        windowName !== "table" ||
-        attractSuspended ||
-        isCollectionMode() ||
-        !vpin.tableData ||
-        vpin.tableData.length < 2 ||
-        vpin.menuUP ||
-        vpin.collectionMenuUP ||
-        vpin.tutorialUP ||
-        document.getElementById("remote-launch-overlay")?.style.display === "flex"
-    );
-}
-
-function queueNextAttractAdvance() {
-    if (!attractModeActive) return;
-    attractAdvanceTimer = setTimeout(runAttractAdvance, ATTRACT_STEP_MS);
-}
-
-function runAttractAdvance() {
-    if (!attractModeActive || shouldPauseAttractMode()) {
-        stopAttractMode();
-        markUserActivity(false);
-        return;
-    }
-
-    currentTableIndex = wrapIndex(currentTableIndex + 1, vpin.tableData.length);
-    isAnimating = true;
-    updateScreen('right');
-    vpin.sendMessageToAllWindows({
-        type: 'TableIndexUpdate',
-        index: currentTableIndex
-    });
-    queueNextAttractAdvance();
-}
-
-function startAttractMode() {
-    if (shouldPauseAttractMode()) {
-        markUserActivity(false);
-        return;
-    }
-
-    attractModeActive = true;
-    runAttractAdvance();
-}
-
-function markUserActivity(stopAttract = true) {
-    if (windowName !== "table") return;
-
-    clearAttractTimers();
-    if (stopAttract) stopAttractMode();
-    attractIdleTimer = setTimeout(startAttractMode, ATTRACT_IDLE_MS);
-}
-
-function setupAttractMode() {
-    ["mousedown", "touchstart", "keydown"].forEach((eventName) => {
-        window.addEventListener(eventName, () => markUserActivity(), { passive: true });
-    });
-}
-
-async function toggleCollectionMode() {
-    stopAttractMode();
-    if (isCollectionMode()) {
-        leaveCollectionMode();
-    } else {
-        await enterCollectionMode();
-    }
-}
-
-async function enterCollectionMode() {
-    if (windowName !== "table") return;
-
-    const metadata = parseMaybeJson(await vpin.call("get_collections_metadata").catch(() => []), []);
-    const namedCollections = Array.isArray(metadata) ? metadata.filter(entry => entry && entry.name) : [];
-    collectionEntries = namedCollections;
-
-    if (!collectionEntries.length) return;
-
-    const currentCollection = await vpin.call("get_current_collection").catch(() => "None");
-    currentCollectionIndex = currentCollection && currentCollection !== "None"
-        ? Math.max(0, collectionEntries.findIndex(entry => entry.name === currentCollection))
-        : 0;
-    wheelMode = "collections";
-    isAnimating = false;
-    document.body.classList.add("collection-wheel-mode");
-    updateScreen();
-}
-
-function leaveCollectionMode() {
-    wheelMode = "tables";
-    isAnimating = false;
-    document.body.classList.remove("collection-wheel-mode");
-    updateScreen();
-    markUserActivity(false);
-}
-
-async function selectCurrentCollection() {
-    const collection = collectionEntries[currentCollectionIndex];
-    if (!collection?.name) return;
-
-    wheelMode = "tables";
-    document.body.classList.remove("collection-wheel-mode");
-    stopAttractMode();
-
-    await vpin.call("set_tables_by_collection", collection.name);
-    await vpin.getTableData();
-
-    currentTableIndex = 0;
-    isAnimating = false;
-    updateScreen();
-    vpin.sendMessageToAllWindows({
-        type: "TableDataChange",
-        index: currentTableIndex,
-        collection: collection.name
-    });
-    markUserActivity(false);
-}
-
-//
-// MISC suuport functions
-//
-
-// circular table index
-function wrapIndex(index, length) {
-    return (index + length) % length;
+function draw() {
+  const list = vpin.activeList();
+  drawSelection(list);
+  if (list.length > 0) drawWheels(list);
+  else {
+    wheelsEl.replaceChildren();
+    cards.clear();
+  }
 }

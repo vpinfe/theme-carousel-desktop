@@ -1,10 +1,11 @@
 {
   "name": "Carousel Desktop",
-  "version": "1.9",
+  "version": "2.0.0",
   "author": "superhac",
-  "description": "A theme for desktop players with wheel carousel.",
+  "description": "A desktop theme with the backglass picture behind a row of wheels and the selected table's name, manufacturer and authors above it.",
   "preview_image": "preview.png",
-  "supported_screens": 3,
   "type": "desktop",
-  "change_log": "@gitfool - pageup and pagedown, faster scroller."
+  "change_log": "Rebuilt for VPinFE 3.0: core now handles input, audio, preloading, layout, the loading indicator, attract mode and the backglass and score view pages. The row of wheels fits any screen shape, and the collection picker is core's.",
+  "min_vpinfe": "3.0",
+  "windows": ["playfield"]
 }

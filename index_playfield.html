@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>VPinFE - Carousel Desktop</title>
+  <!-- Core's stylesheet comes first so style.css can restyle what it provides:
+       the layout classes, the loading indicator and the hold ring. -->
+  <link rel="stylesheet" href="/core/common/vpinfe-style.css" />
+  <link rel="stylesheet" href="style.css" />
+  <script src="/core/common/vpinfe-core.js"></script>
+</head>
+<body>
+  <!-- .vpinfe-upright turns the whole page to face the player when the cabinet
+       mounts the playfield screen sideways. Leave it on the outermost element. -->
+  <main class="stage vpinfe-upright">
+
+    <!-- The backglass picture of the selected table. theme.js fills it. -->
+    <div class="art" id="art"></div>
+
+    <!-- The selected table: its name and manufacturer on the left, its authors on the right. -->
+    <section class="info" id="info">
+      <div class="about">
+        <h1 id="title"></h1>
+        <p id="meta"></p>
+      </div>
+      <div class="credit" id="credit">
+        <p class="credit-label">Authors</p>
+        <p id="authors"></p>
+      </div>
+    </section>
+
+    <!-- The wheels. theme.js draws up to nine, the selected one in the middle. -->
+    <ol class="wheels" id="wheels" aria-label="Tables"></ol>
+
+    <!-- Shown when the list is empty. Core says why while it waits on a folder. -->
+    <p id="empty" hidden></p>
+  </main>
+
+  <!-- Core mounts its dialogs here: the menu, the collection picker and confirms. -->
+  <div id="overlay-root"></div>
+
+  <script src="theme.js"></script>
+</body>
+</html>

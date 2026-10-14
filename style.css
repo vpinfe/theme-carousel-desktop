@@ -1,302 +1,267 @@
-/* Font imports */
+/* Carousel Desktop - the backglass picture full screen, the selected table's name and authors
+   above a dark band of wheels.
+
+   Lengths are a fraction of the stage, so the page keeps its shape on any screen: cqw and
+   cqh are the width and height of the stage, cqmin the shorter side. */
+
 @font-face {
-  font-family: 'RocketCommand';
-  src: url('fonts/RocketCommandExpanded-DYA5m.otf') format('opentype');
-  font-weight: 400;
-  font-style: normal;
+  font-family: "Rocket Command Expanded";
+  src: url("fonts/RocketCommandExpanded-DYA5m.otf") format("opentype");
+  font-display: swap;
 }
 
 @font-face {
-  font-family: 'RocketCommandGradient';
-  src: url('fonts/RocketCommandGradient-q2Jnl.otf') format('opentype');
-  font-weight: 700;
-  font-style: normal;
+  font-family: "Rocket Command Gradient";
+  src: url("fonts/RocketCommandGradient-q2Jnl.otf") format("opentype");
+  font-display: swap;
 }
 
-/* Reset and base styles */
 html,
 body {
   margin: 0;
-  padding: 0;
   height: 100%;
-  background-color: #0a0a0a;
-  color: white;
-  overflow-x: hidden;
-  overflow-y: hidden;
-  font-family: 'RocketCommand', sans-serif;
+  background: #0a0a0a;
+  color: #fff;
+  font-family: "Rocket Command Expanded", sans-serif;
+  overflow: hidden;
 }
 
-/* UI Container - wraps all UI elements */
-.ui-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
+/* The stage is styled by class, not by id: an id would outrank the rules in
+   vpinfe-style.css that give .vpinfe-upright its position and size, and the page would
+   stop turning on a sideways cabinet screen. */
+.stage {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  container-type: size;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
-  z-index: 10;
+  background: #0a0a0a;
 }
 
-/* BG Image container - now covers full screen */
-.bg-image-container {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  overflow: hidden;
-  z-index: 0;
+[hidden] {
+  display: none !important;
 }
 
-.bg-image-container img {
+/* --- The art ---------------------------------------------------------------------- */
+.art {
   position: absolute;
-  top: 0;
-  left: 0;
+  inset: 0;
+}
+
+.layer {
+  position: absolute;
+  inset: 0;
+  transition: opacity 0.5s ease-in-out;
+}
+
+.layer.entering,
+.layer.exiting {
+  opacity: 0;
+}
+
+/* The picture covers the stage and keeps its top edge, so the backglass lights stay in view
+   when a taller screen crops its foot. */
+.layer > img {
   width: 100%;
   height: 100%;
   object-fit: cover;
   object-position: top center;
-  transition: opacity 0.5s ease-in-out, transform 0.3s ease-in-out;
 }
 
-/* Info row - contains table info and authors */
-.info-row {
+/* --- The selected table ----------------------------------------------------------- */
+.info {
+  position: relative;
+  z-index: 1;
   display: flex;
   justify-content: space-between;
   align-items: flex-end;
-  width: 100%;
-  padding: 0 0.5vw 1vh 1vw;
-  position: relative;
-  flex-wrap: nowrap;
+  padding: 0 1cqw 1cqh 1cqw;
   box-sizing: border-box;
   background: linear-gradient(to bottom, rgba(0, 0, 0, 0) 0%, rgba(0, 0, 0, 0.6) 100%);
-  z-index: 1;
 }
 
-/* Table info overlay */
-.table-info {
+.about {
   max-width: 40%;
-  flex-shrink: 0;
-  padding-left: 0;
 }
 
-.table-name {
-  font-size: 4vw;
+.credit {
+  max-width: 38%;
+  margin-left: auto;
+  text-align: right;
+}
+
+h1 {
+  margin: 0 0 1cqh 0;
+  font-size: 4cqw;
   font-weight: 400;
-  font-family: 'RocketCommand', sans-serif;
-  margin: 0 0 1vh 0;
-  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
-  letter-spacing: -0.02em;
   line-height: 1.1;
+  letter-spacing: -0.02em;
+  text-shadow: 0 0.4cqh 1.2cqh rgba(0, 0, 0, 0.8);
   overflow-wrap: break-word;
-  word-wrap: break-word;
   hyphens: auto;
 }
 
-.table-meta {
-  font-size: 1.8vw;
-  font-weight: 400;
-  font-family: 'RocketCommandGradient', sans-serif;
+h1[data-size="long"] {
+  font-size: 3.2cqw;
+}
+
+h1[data-size="longer"] {
+  font-size: 2.5cqw;
+}
+
+#meta {
   margin: 0;
-  opacity: 0.9;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+  font-family: "Rocket Command Gradient", sans-serif;
+  font-size: 1.8cqw;
   letter-spacing: 0.05em;
+  opacity: 0.9;
+  text-shadow: 0 0.2cqh 0.8cqh rgba(0, 0, 0, 0.6);
 }
 
-/* Table authors overlay - right side */
-.table-authors {
-  max-width: 45%;
-  text-align: right;
-  flex-shrink: 0;
-  margin-left: auto;
-  padding-right: 0;
-  overflow: visible;
-}
-
-.authors-label {
-  font-size: 1.4vw;
-  font-weight: 400;
-  font-family: 'RocketCommand', sans-serif;
-  margin: 0 0 0.5vh 0;
-  opacity: 0.7;
-  text-shadow: 0 2px 8px rgba(0, 0, 0, 0.6);
+.credit-label {
+  margin: 0 0 0.5cqh 0;
+  font-size: 1.4cqw;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+  opacity: 0.7;
+  text-shadow: 0 0.2cqh 0.8cqh rgba(0, 0, 0, 0.6);
 }
 
-.authors-text {
-  font-size: 2vw;
-  font-weight: 400;
-  font-family: 'RocketCommandGradient', sans-serif;
+#authors {
   margin: 0;
-  text-shadow: 0 4px 12px rgba(0, 0, 0, 0.8);
-  letter-spacing: -0.02em;
+  font-family: "Rocket Command Gradient", sans-serif;
+  font-size: 2cqw;
   line-height: 1.2;
+  letter-spacing: -0.02em;
+  text-shadow: 0 0.4cqh 1.2cqh rgba(0, 0, 0, 0.8);
   overflow-wrap: break-word;
-  word-wrap: break-word;
   hyphens: auto;
 }
 
-/* Carousel container */
-.carousel-container {
-  height: auto;
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  overflow-x: clip;
-  overflow-y: visible;
+#authors[data-size="long"] {
+  font-size: 1.6cqw;
+}
+
+#authors[data-size="longer"] {
+  font-size: 1.3cqw;
+}
+
+/* --- The wheels ------------------------------------------------------------------- */
+/* theme.js sets --offset, how many places a wheel is from the middle. */
+.wheels {
+  --cell: min(10cqw, 15cqh);
+  --pitch: calc(var(--cell) + 1cqw);
   position: relative;
-  box-sizing: border-box;
-  padding: 1vh 0;
-  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.6) 0%, rgba(0, 0, 0, 0.6) 100%);
   z-index: 2;
+  flex: none;
+  height: calc(var(--cell) + 2cqh);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  background: rgba(0, 0, 0, 0.6);
 }
 
-/* Carousel track */
-.carousel-track {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 1vw;
-  padding: 0 2vw;
-  overflow-x: visible;
-  overflow-y: visible;
+.stage[data-view="collections"] .wheels {
+  --cell: min(12cqw, 18cqh);
 }
 
-/* Carousel item */
-.carousel-item {
-  position: relative;
-  flex-shrink: 0;
-  width: 10vw;
-  height: 15vh;
-  overflow: visible;
-  transition: transform 0.18s ease-out, opacity 0.18s ease-out;
+.wheels li {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: var(--cell);
+  height: var(--cell);
+  display: grid;
+  place-items: center;
+  transform:
+    translate(-50%, -50%)
+    translateX(calc(var(--offset) * var(--pitch)))
+    scale(0.8);
   opacity: 0.6;
-  cursor: pointer;
+  transition: transform 0.18s ease-out, opacity 0.18s ease-out;
   will-change: transform, opacity;
 }
 
-.carousel-item img {
+.wheels li.out {
+  opacity: 0;
+}
+
+.wheels li.selected {
+  opacity: 1;
+  z-index: 3;
+  transform:
+    translate(-50%, -50%)
+    translateX(calc(var(--offset) * var(--pitch)))
+    scale(1.56)
+    translateY(-45%);
+}
+
+.stage[data-view="collections"] .wheels li.selected {
+  transform:
+    translate(-50%, -50%)
+    translateX(calc(var(--offset) * var(--pitch)))
+    scale(1.6)
+    translateY(-38%);
+}
+
+.wheels li > img {
   width: 100%;
   height: 100%;
   object-fit: contain;
-  transition: filter 0.18s ease-out;
-  filter: drop-shadow(0 4px 8px rgba(0, 0, 0, 0.6));
+  filter: drop-shadow(0 0.5cqh 1cqh rgba(0, 0, 0, 0.6));
 }
 
-/* Selected carousel item */
-.carousel-item.selected {
-  opacity: 1;
-  transform: scale(1.56) translateY(-45%);
-  z-index: 500;
+.wheels li.selected > img {
+  filter:
+    drop-shadow(0 1.5cqh 4cqh rgba(0, 0, 0, 0.9))
+    drop-shadow(0 0 4cqh rgba(255, 255, 255, 0.2));
 }
 
-/* Non-selected items scale down */
-.carousel-item:not(.selected) {
-  transform: scale(0.8);
+/* The shake turns the picture, not the item, so it does not undo the item's size and lift. */
+.wheels li.selected.shake > img {
+  animation: shake 0.18s ease-in-out;
 }
 
-.carousel-item.selected img {
-  filter: drop-shadow(0 12px 32px rgba(0, 0, 0, 0.9))
-          drop-shadow(0 0 40px rgba(255, 255, 255, 0.2));
+@keyframes shake {
+  0% { rotate: 0deg; }
+  10% { rotate: -5deg; }
+  30% { rotate: 5deg; }
+  50% { rotate: -5deg; }
+  70% { rotate: 5deg; }
+  90% { rotate: -2deg; }
+  100% { rotate: 0deg; }
 }
 
-body.collection-wheel-mode .carousel-item {
-  width: 12vw;
-  height: 18vh;
-}
-
-body.collection-wheel-mode .carousel-item.selected {
-  transform: scale(1.6) translateY(-38%);
-}
-
-/* Hover effect (for testing) */
-.carousel-item:hover {
-  opacity: 0.8;
-}
-
-/* Missing image placeholder */
-.carousel-item .missing-placeholder {
+/* A table with no wheel is named in its place. */
+.missing {
+  display: grid;
+  place-items: center;
+  box-sizing: border-box;
   width: 100%;
   height: 100%;
+  padding: 1cqh;
   background: linear-gradient(135deg, #2a2a2a 0%, #1a1a1a 100%);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 0.8vw;
-  color: rgba(255, 255, 255, 0.3);
+  color: rgba(255, 255, 255, 0.55);
+  font-size: 1cqw;
   text-align: center;
-  padding: 1vh;
-}
-
-/* Jiggle animation for selected wheel */
-@keyframes jiggle {
-  0% {
-    transform: scale(1.56) translateY(-45%) rotate(0deg);
-  }
-  10% {
-    transform: scale(1.56) translateY(-45%) rotate(-5deg);
-  }
-  30% {
-    transform: scale(1.56) translateY(-45%) rotate(5deg);
-  }
-  50% {
-    transform: scale(1.56) translateY(-45%) rotate(-5deg);
-  }
-  70% {
-    transform: scale(1.56) translateY(-45%) rotate(5deg);
-  }
-  90% {
-    transform: scale(1.56) translateY(-45%) rotate(-2deg);
-  }
-  100% {
-    transform: scale(1.56) translateY(-45%) rotate(0deg);
-  }
-}
-
-.carousel-item.jiggle {
-  animation: jiggle 0.18s ease-in-out !important;
-}
-
-/* Fade transition container - wraps entire screen content */
-#fadeContainer {
-  position: fixed;
-  top: 0;
-  left: 0;
-  width: 100vw;
-  height: 100vh;
-  transition: opacity 4.5s ease-in-out;
-  opacity: 1;
-}
-
-/* Secondary windows (BG and DMD) */
-.secondary-window {
-  width: 100vw;
-  height: 100vh;
-  background-color: #000;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: opacity 4.5s ease-in-out;
-  opacity: 1;
-}
-
-.fullscreen-image-container {
-  width: 100%;
-  height: 100%;
-  position: relative;
   overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
-.fullscreen-image-container img {
+#empty {
   position: absolute;
-  top: 0;
-  left: 0;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-  transition: opacity 0.5s ease-in-out;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  margin: 0;
+  font-size: 4cqmin;
+  color: rgba(244, 244, 244, 0.55);
+}
+
+/* The loading indicator is core's. */
+.vpinfe-launch-spinner {
+  border-top-color: rgba(255, 255, 255, 0.9);
 }
