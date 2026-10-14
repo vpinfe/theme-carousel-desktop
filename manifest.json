@@ -5,7 +5,7 @@
   "description": "A desktop theme with the backglass picture behind a row of wheels and the selected table's name, manufacturer and authors above it.",
   "preview_image": "preview.png",
   "type": "desktop",
-  "change_log": "Rebuilt for VPinFE 3.0: core now handles input, audio, preloading, layout, the loading indicator, attract mode and the backglass and score view pages. The row of wheels fits any screen shape, and the collection picker is core's.",
+  "change_log": "Rebuilt for VPinFE 3.0.\n\nCore now handles input, audio, preloading, layout, the loading indicator, attract mode and the backglass and score view pages. The row of wheels fits any screen shape.\n\nThe collection picker is core's, and the collection a person starts on is Open On in VPinFE's settings.",
   "min_vpinfe": "3.0",
   "windows": ["playfield"]
 }
